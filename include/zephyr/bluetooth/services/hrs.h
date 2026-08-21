@@ -21,6 +21,8 @@
 
 #include <zephyr/sys/slist.h>
 
+struct bt_conn;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -93,6 +95,15 @@ int bt_hrs_cb_unregister(struct bt_hrs_cb *cb);
  *  @return Zero in case of success and error code in case of error.
  */
 int bt_hrs_notify(uint16_t heartrate);
+
+/** @brief Notify one connection of a heart rate measurement.
+ *
+ * @param conn Connection to notify.
+ * @param heartrate Heart rate measurement in beats per minute.
+ *
+ * @return Zero on success or a negative error code.
+ */
+int bt_hrs_notify_conn(struct bt_conn *conn, uint16_t heartrate);
 
 #ifdef __cplusplus
 }

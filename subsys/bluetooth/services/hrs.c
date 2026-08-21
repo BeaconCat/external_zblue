@@ -159,15 +159,19 @@ int bt_hrs_cb_unregister(struct bt_hrs_cb *cb)
 	return 0;
 }
 
-int bt_hrs_notify(uint16_t heartrate)
+int bt_hrs_notify_conn(struct bt_conn *conn, uint16_t heartrate)
 {
-	int rc;
 	static uint8_t hrm[2];
 
 	hrm[0] = 0x06; /* uint8, sensor contact */
 	hrm[1] = heartrate;
 
-	rc = bt_gatt_notify(NULL, &hrs_svc.attrs[1], &hrm, sizeof(hrm));
+	return bt_gatt_notify(conn, &hrs_svc.attrs[1], &hrm, sizeof(hrm));
+}
+
+int bt_hrs_notify(uint16_t heartrate)
+{
+	int rc = bt_hrs_notify_conn(NULL, heartrate);
 
 	return rc == -ENOTCONN ? 0 : rc;
 }
