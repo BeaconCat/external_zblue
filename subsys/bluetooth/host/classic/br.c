@@ -648,6 +648,8 @@ check_names:
 			listener->timeout(hdev->discovery_results, hdev->discovery_results_count);
 		}
 	}
+
+	bt_br_discovery_reset(hdev);
 }
 
 void bt_hci_read_remote_features_complete(struct bt_dev *hdev, struct net_buf *buf)
