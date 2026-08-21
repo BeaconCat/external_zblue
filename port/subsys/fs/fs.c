@@ -120,7 +120,7 @@ int fs_stat(const char *abs_path, struct fs_dirent *entry)
 
 	ret = lstat(abs_path, &buf);
 	if (ret != 0) {
-		return ret;
+		return -errno;
 	}
 
     size_t len_to_copy = strnlen(abs_path, sizeof(entry->name) - 1);
