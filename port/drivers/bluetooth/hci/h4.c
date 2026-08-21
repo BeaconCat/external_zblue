@@ -39,7 +39,14 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/drivers/bluetooth.h>
 
-extern void btsnoop_log_capture(uint8_t is_receive, uint8_t *hci_pkt, uint32_t hci_pkt_size);
+__attribute__((weak)) void btsnoop_log_capture(uint8_t is_receive,
+					       uint8_t *hci_pkt,
+					       uint32_t hci_pkt_size)
+{
+	(void)is_receive;
+	(void)hci_pkt;
+	(void)hci_pkt_size;
+}
 
 #define LOG_LEVEL CONFIG_BT_HCI_DRIVER_LOG_LEVEL
 #include <zephyr/logging/log.h>
