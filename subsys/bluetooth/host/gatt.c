@@ -693,9 +693,10 @@ static void set_change_aware(struct gatt_cf_cfg *cfg, bool aware)
 #endif
 }
 
-static int bt_gatt_store_cf(uint8_t id, const bt_addr_le_t *peer);
+static int bt_gatt_store_cf(struct bt_dev *hdev, uint8_t id,
+			    const bt_addr_le_t *peer);
 
-static void set_all_change_unaware(void)
+static void set_all_change_unaware(struct bt_dev *hdev)
 {
 #if defined(CONFIG_BT_SETTINGS)
 	/* Mark all bonded peers as change-unaware.
@@ -711,13 +712,14 @@ static void set_all_change_unaware(void)
 
 		if (!bt_addr_le_eq(&cfg->peer, BT_ADDR_LE_ANY)) {
 			set_change_aware_no_store(cfg, false);
-			bt_gatt_store_cf(cfg->id, &cfg->peer);
+			bt_gatt_store_cf(hdev, cfg->id, &cfg->peer);
 		}
 	}
 #endif	/* CONFIG_BT_SETTINGS */
 }
 
-static struct gatt_cf_cfg *find_cf_cfg(struct bt_conn *conn)
+static struct gatt_cf_cfg *find_cf_cfg(struct bt_dev *hdev,
+				       struct bt_conn *conn)
 {
 	int i;
 
@@ -742,7 +744,7 @@ static ssize_t cf_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	struct gatt_cf_cfg *cfg;
 	uint8_t data[1] = {};
 
-	cfg = find_cf_cfg(conn);
+	cfg = find_cf_cfg(conn->hdev, conn);
 	if (cfg) {
 		memcpy(data, cfg->data, sizeof(data));
 	}
@@ -792,9 +794,9 @@ static ssize_t cf_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
 
-	cfg = find_cf_cfg(conn);
+	cfg = find_cf_cfg(conn->hdev, conn);
 	if (!cfg) {
-		cfg = find_cf_cfg(NULL);
+		cfg = find_cf_cfg(conn->hdev, NULL);
 	}
 
 	if (!cfg) {
@@ -857,7 +859,7 @@ static int db_hash_update(struct gen_hash_state *state, uint8_t *data, size_t le
 	return 0;
 }
 
-static int db_hash_finish(struct gen_hash_state *state)
+static int db_hash_finish(struct bt_dev *hdev, struct gen_hash_state *state)
 {
 	size_t mac_length;
 	psa_status_t ret = psa_mac_sign_finish(&(state->operation), hdev->gatt_ctx->db_hash.hash, 16,
@@ -981,12 +983,13 @@ static uint8_t gen_hash_m(const struct bt_gatt_attr *attr, uint16_t handle,
 	return BT_GATT_ITER_CONTINUE;
 }
 
-static void db_hash_store(void)
+static void db_hash_store(struct bt_dev *hdev)
 {
 #if defined(CONFIG_BT_SETTINGS)
 	int err;
 
-	err = bt_settings_store_hash(&hdev->gatt_ctx->db_hash.hash, sizeof(hdev->gatt_ctx->db_hash.hash));
+	err = bt_settings_store_hash(hdev->dev_id, &hdev->gatt_ctx->db_hash.hash,
+				     sizeof(hdev->gatt_ctx->db_hash.hash));
 	if (err) {
 		LOG_ERR("Failed to save Database Hash (err %d)", err);
 	}
@@ -995,7 +998,7 @@ static void db_hash_store(void)
 #endif	/* CONFIG_BT_SETTINGS */
 }
 
-static void db_hash_gen(void)
+static void db_hash_gen(struct bt_dev *hdev)
 {
 	uint8_t key[16] = {};
 	struct gen_hash_state state;
@@ -1006,7 +1009,7 @@ static void db_hash_gen(void)
 
 	bt_gatt_foreach_attr(0x0001, 0xffff, gen_hash_m, &state);
 
-	if (db_hash_finish(&state) != 0) {
+	if (db_hash_finish(hdev, &state) != 0) {
 		return;
 	}
 
@@ -1031,7 +1034,7 @@ static void do_db_hash(struct bt_dev* hdev)
 	bool new_hash = !atomic_test_bit(hdev->gatt_ctx->gatt_sc.flags, DB_HASH_VALID);
 
 	if (new_hash) {
-		db_hash_gen();
+		db_hash_gen(hdev);
 	}
 
 #if defined(CONFIG_BT_SETTINGS)
@@ -1053,8 +1056,8 @@ static void do_db_hash(struct bt_dev* hdev)
 		 * the calculated hash to settings (if it has changed).
 		 */
 		if (new_hash) {
-			set_all_change_unaware();
-			db_hash_store();
+			set_all_change_unaware(hdev);
+			db_hash_store(hdev);
 		}
 	} else {
 		/* this is only supposed to run once, on bootup, after the hash
@@ -1080,21 +1083,23 @@ static void do_db_hash(struct bt_dev* hdev)
 		 * database range to invalidate client-side cache and force
 		 * discovery on reconnect.
 		 */
-		sc_indicate(0x0001, 0xffff);
+		sc_indicate(hdev, 0x0001, 0xffff);
 
 		/* Hash did not match, overwrite with current hash.
 		 * Also immediately set all peers (in settings) as
 		 * change-unaware.
 		 */
-		set_all_change_unaware();
-		db_hash_store();
+		set_all_change_unaware(hdev);
+		db_hash_store(hdev);
 	}
 #endif /* defined(CONFIG_BT_SETTINGS) */
 }
 
 static void db_hash_process(struct k_work *work)
 {
-	struct db_hash *hash = CONTAINER_OF(work, struct db_hash, work);
+	struct k_work_delayable *dwork =
+		CONTAINER_OF(work, struct k_work_delayable, work);
+	struct db_hash *hash = CONTAINER_OF(dwork, struct db_hash, work);
 	struct bt_dev_gatt_ctx *gatt_ctx = CONTAINER_OF(hash, struct bt_dev_gatt_ctx, db_hash);
 
 	do_db_hash(gatt_ctx->hdev);
@@ -1112,10 +1117,10 @@ static ssize_t db_hash_read(struct bt_conn *conn,
 	 */
 	(void)k_work_cancel_delayable_sync(&hdev->gatt_ctx->db_hash.work, &hdev->gatt_ctx->db_hash.sync);
 	if (!atomic_test_bit(hdev->gatt_ctx->gatt_sc.flags, DB_HASH_VALID)) {
-		db_hash_gen();
+		db_hash_gen(hdev);
 		if (IS_ENABLED(CONFIG_BT_SETTINGS)) {
-			set_all_change_unaware();
-			db_hash_store();
+			set_all_change_unaware(hdev);
+			db_hash_store(hdev);
 		}
 	}
 
@@ -1125,7 +1130,7 @@ static ssize_t db_hash_read(struct bt_conn *conn,
 	 * The client reads the Database Hash characteristic and then the server
 	 * receives another ATT request from the client.
 	 */
-	cfg = find_cf_cfg(conn);
+	cfg = find_cf_cfg(conn->hdev, conn);
 	if (cfg &&
 	    CF_ROBUST_CACHING(cfg) &&
 	    !atomic_test_bit(cfg->flags, CF_CHANGE_AWARE)) {
@@ -1140,7 +1145,7 @@ static void remove_cf_cfg(struct bt_conn *conn)
 {
 	struct gatt_cf_cfg *cfg;
 
-	cfg = find_cf_cfg(conn);
+	cfg = find_cf_cfg(conn->hdev, conn);
 	if (!cfg) {
 		return;
 	}
@@ -1209,7 +1214,7 @@ static int bt_gatt_store_cf(struct bt_dev *hdev, uint8_t id, const bt_addr_le_t 
 		str = dst;
 	}
 
-	err = bt_settings_store_cf(id, peer, str, len);
+	err = bt_settings_store_cf(hdev->dev_id, id, peer, str, len);
 	if (err) {
 		LOG_ERR("Failed to store Client Features (err %d)", err);
 		return err;
@@ -1448,7 +1453,7 @@ static void sc_indicate_rsp(struct bt_conn *conn,
 	 * for the Service Changed characteristic
 	 */
 	if (bt_att_fixed_chan_only(conn)) {
-		cfg = find_cf_cfg(conn);
+		cfg = find_cf_cfg(conn->hdev, conn);
 		if (cfg && CF_ROBUST_CACHING(cfg)) {
 			set_change_aware(cfg, true);
 		}
@@ -1690,7 +1695,7 @@ void bt_gatt_init(struct bt_dev *hdev)
 	if (IS_ENABLED(CONFIG_BT_LONG_WQ)) {
 		bt_long_wq_schedule(&gatt_ctx->db_hash.work, DB_HASH_TIMEOUT);
 	} else {
-		k_work_schedule(&gatt_ctx->gatt_ctx->db_hash.work, DB_HASH_TIMEOUT);
+		k_work_schedule(&gatt_ctx->db_hash.work, DB_HASH_TIMEOUT);
 	}
 #endif /* CONFIG_BT_GATT_CACHING */
 
@@ -2560,7 +2565,7 @@ static bool gatt_cf_notify_multi(struct bt_conn *conn)
 {
 	struct gatt_cf_cfg *cfg;
 
-	cfg = find_cf_cfg(conn);
+	cfg = find_cf_cfg(conn->hdev, conn);
 	if (!cfg) {
 		return false;
 	}
@@ -2951,7 +2956,8 @@ static uint8_t notify_cb(const struct bt_gatt_attr *attr, uint16_t handle,
 			continue;
 		}
 
-		conn = bt_conn_lookup_addr_le_mc(data->hdev->dev_id, cfg->id, &cfg->peer);
+		conn = bt_conn_lookup_state_le(data->hdev, cfg->id, &cfg->peer,
+					       BT_CONN_CONNECTED);
 		if (!conn) {
 			continue;
 		}
@@ -3479,7 +3485,7 @@ static void sc_restore_rsp(struct bt_conn *conn,
 	 */
 
 	if (bt_att_fixed_chan_only(conn)) {
-		cfg = find_cf_cfg(conn);
+		cfg = find_cf_cfg(conn->hdev, conn);
 		if (cfg && CF_ROBUST_CACHING(cfg)) {
 			set_change_aware(cfg, true);
 		}
@@ -6379,7 +6385,7 @@ bool bt_gatt_change_aware(struct bt_conn *conn, bool req)
 #if defined(CONFIG_BT_GATT_CACHING)
 	struct gatt_cf_cfg *cfg;
 
-	cfg = find_cf_cfg(conn);
+	cfg = find_cf_cfg(conn->hdev, conn);
 	if (!cfg || !CF_ROBUST_CACHING(cfg)) {
 		return true;
 	}
@@ -6642,6 +6648,8 @@ static int cf_set(const char *name, size_t len_rd, settings_read_cb read_cb,
 	struct gatt_cf_cfg *cfg;
 	bt_addr_le_t addr;
 	const char *next;
+	const char *dev_next;
+	struct bt_dev *hdev;
 	ssize_t len;
 	int err;
 	uint8_t id;
@@ -6657,7 +6665,19 @@ static int cf_set(const char *name, size_t len_rd, settings_read_cb read_cb,
 		return -EINVAL;
 	}
 
-	settings_name_next(name, &next);
+	settings_name_next(name, &dev_next);
+	if (!dev_next) {
+		LOG_ERR("Missing controller identifier");
+		return -EINVAL;
+	}
+
+	hdev = bt_dev_get(strtoul(dev_next, NULL, 10));
+	if (!hdev) {
+		LOG_ERR("Unable to find controller");
+		return -ENODEV;
+	}
+
+	settings_name_next(dev_next, &next);
 
 	if (!next) {
 		id = BT_ID_DEFAULT;
@@ -6674,7 +6694,7 @@ static int cf_set(const char *name, size_t len_rd, settings_read_cb read_cb,
 
 	cfg = find_cf_cfg_by_addr(hdev, id, &addr);
 	if (!cfg) {
-		cfg = find_cf_cfg(NULL);
+		cfg = find_cf_cfg(hdev, NULL);
 		if (!cfg) {
 			LOG_ERR("Unable to restore CF: no cfg left");
 			return -ENOMEM;
@@ -6727,7 +6747,17 @@ BT_SETTINGS_DEFINE(cf, "cf", cf_set, NULL);
 static int db_hash_set(const char *name, size_t len_rd,
 		       settings_read_cb read_cb, void *cb_arg)
 {
+	struct bt_dev *hdev;
 	ssize_t len;
+
+	if (!name) {
+		return -EINVAL;
+	}
+
+	hdev = bt_dev_get(strtoul(name, NULL, 10));
+	if (!hdev) {
+		return -ENODEV;
+	}
 
 	len = read_cb(cb_arg, hdev->gatt_ctx->db_hash.stored_hash, sizeof(hdev->gatt_ctx->db_hash.stored_hash));
 	if (len < 0) {
