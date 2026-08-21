@@ -110,17 +110,20 @@ uint8_t bt_bas_get_battery_level(void)
 	return battery_level;
 }
 
-int bt_bas_set_battery_level(uint8_t level)
+int bt_bas_set_battery_level_conn(struct bt_conn *conn, uint8_t level)
 {
-	int rc;
-
 	if (level > 100U) {
 		return -EINVAL;
 	}
 
 	battery_level = level;
 
-	rc = bt_gatt_notify(NULL, &bas.attrs[1], &level, sizeof(level));
+	return bt_gatt_notify(conn, &bas.attrs[1], &level, sizeof(level));
+}
+
+int bt_bas_set_battery_level(uint8_t level)
+{
+	int rc = bt_bas_set_battery_level_conn(NULL, level);
 
 	if (IS_ENABLED(CONFIG_BT_BAS_BLS_BATTERY_LEVEL_PRESENT)) {
 		bt_bas_bls_set_battery_level(level);

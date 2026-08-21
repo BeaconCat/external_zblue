@@ -22,6 +22,8 @@
 #include <stdint.h>
 #include <zephyr/sys/util.h>
 
+struct bt_conn;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -219,6 +221,15 @@ uint8_t bt_bas_get_battery_level(void);
  *  @return Zero in case of success and error code in case of error.
  */
 int bt_bas_set_battery_level(uint8_t level);
+
+/** @brief Update and notify one connection of the battery level.
+ *
+ * @param conn Connection to notify.
+ * @param level Battery level in percent.
+ *
+ * @return Zero on success or a negative error code.
+ */
+int bt_bas_set_battery_level_conn(struct bt_conn *conn, uint8_t level);
 
 /**
  * @brief Set the battery present status.
