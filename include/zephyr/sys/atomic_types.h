@@ -8,14 +8,22 @@
 #ifndef ZEPHYR_INCLUDE_SYS_ATOMIC_TYPES_H_
 #define ZEPHYR_INCLUDE_SYS_ATOMIC_TYPES_H_
 
+#include <stdint.h>
+
+#include <nuttx/atomic.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef long atomic_t;
-typedef atomic_t atomic_val_t;
-typedef void *atomic_ptr_t;
-typedef atomic_ptr_t atomic_ptr_val_t;
+typedef int32_t atomic_val_t;
+#if INTPTR_MAX >= INT64_MAX
+typedef volatile int64_t atomic_ptr_t;
+typedef int64_t atomic_ptr_val_t;
+#else
+typedef volatile int32_t atomic_ptr_t;
+typedef int32_t atomic_ptr_val_t;
+#endif
 
 #ifdef __cplusplus
 }
