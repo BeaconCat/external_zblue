@@ -98,6 +98,7 @@ static K_KERNEL_STACK_DEFINE(rx_thread_stack, CONFIG_BT_RX_STACK_SIZE);
 static void init_work(struct k_work *work);
 
 static struct bt_dev bt_dev_pool[CONFIG_BT_NUM_CTLRS];
+static bt_hci_hardware_error_cb_t hardware_error_cb;
 
 #if 0
 struct bt_dev bt_dev = {
@@ -2448,6 +2449,9 @@ static void hci_hardware_error(struct bt_dev *hdev, struct net_buf *buf)
 	evt = net_buf_pull_mem(buf, sizeof(*evt));
 
 	LOG_ERR("Hardware error, hardware code: %d", evt->hardware_code);
+	if (hardware_error_cb) {
+		hardware_error_cb(hdev->dev_id, evt->hardware_code);
+	}
 }
 
 #if defined(CONFIG_BT_SMP)
@@ -2698,6 +2702,12 @@ int bt_hci_register_vnd_evt_cb_mc(uint8_t dev_id, bt_hci_vnd_evt_cb_t cb)
 	return 0;
 }
 #endif /* CONFIG_BT_HCI_VS_EVT_USER */
+
+int bt_hci_hardware_error_cb_register(bt_hci_hardware_error_cb_t cb)
+{
+	hardware_error_cb = cb;
+	return 0;
+}
 
 #if defined(CONFIG_BT_TRANSMIT_POWER_CONTROL)
 void bt_hci_le_transmit_power_report(struct bt_dev *hdev, struct net_buf *buf)
