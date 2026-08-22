@@ -753,9 +753,14 @@ void k_work_queue_start(struct k_work_q *queue,
 	 */
 	flags_set(&queue->flags, flags);
 
-	(void)k_thread_create(&queue->thread, stack, stack_size,
-			      work_queue_main, queue, NULL, NULL,
-			      prio, 0, K_FOREVER);
+	k_tid_t tid = k_thread_create(&queue->thread, stack, stack_size,
+				    work_queue_main, queue, NULL, NULL,
+				    prio, 0, K_FOREVER);
+	if ((intptr_t)tid < 0) {
+		printk("Work queue thread create failed: %ld\n", (long)(intptr_t)tid);
+		flag_clear(&queue->flags, K_WORK_QUEUE_STARTED_BIT);
+		return;
+	}
 
 	if ((cfg != NULL) && (cfg->name != NULL)) {
 		k_thread_name_set(&queue->thread, cfg->name);
