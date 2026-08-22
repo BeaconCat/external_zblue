@@ -3630,6 +3630,7 @@ static void hfp_ag_recv(struct bt_rfcomm_dlc *dlc, struct net_buf *buf)
 
 	if ((err == -ENOEXEC) && bt_ag && bt_ag->vendor_at_cmd) {
 		size_t copy_len;
+		uint8_t vendor_cme;
 
 		size_t buf_size = sizeof(ag->buffer);
 
@@ -3645,7 +3646,9 @@ static void hfp_ag_recv(struct bt_rfcomm_dlc *dlc, struct net_buf *buf)
 			return;
 		}
 
-		err = bt_ag->vendor_at_cmd(ag, ag->buffer, &cme_err);
+		vendor_cme = (uint8_t)cme_err;
+		err = bt_ag->vendor_at_cmd(ag, ag->buffer, &vendor_cme);
+		cme_err = (enum bt_at_cme)vendor_cme;
 	}
 
 	if (err == -EINPROGRESS) {
