@@ -354,7 +354,8 @@ int bt_avdtp_abort(struct bt_avdtp *session, struct bt_avdtp_ctrl_params *param)
 int bt_avdtp_delay_report(struct bt_avdtp *session, struct bt_avdtp_delay_report_params *param);
 
 /* AVDTP send data */
-int bt_avdtp_send_media_data(struct bt_avdtp_sep *sep, struct net_buf *buf);
+int bt_avdtp_send_media_data(struct bt_avdtp_sep *sep, struct net_buf *buf,
+			     bt_conn_tx_cb_t cb, void *user_data);
 
 /* get media l2cap connection MTU */
 uint32_t bt_avdtp_get_media_mtu(struct bt_avdtp_sep *sep);

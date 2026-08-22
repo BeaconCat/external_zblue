@@ -1298,6 +1298,16 @@ struct net_buf *bt_a2dp_stream_create_pdu(struct net_buf_pool *pool, k_timeout_t
 	return buf;
 }
 
+static void a2dp_stream_sent_cb(struct bt_conn *conn, void *user_data, int err)
+{
+	struct bt_a2dp_stream *stream = user_data;
+
+	ARG_UNUSED(conn);
+	if (err == 0 && stream->ops != NULL && stream->ops->sent != NULL) {
+		stream->ops->sent(stream);
+	}
+}
+
 int bt_a2dp_stream_send(struct bt_a2dp_stream *stream, struct net_buf *buf, uint16_t seq_num,
 			uint32_t ts)
 {
@@ -1321,7 +1331,8 @@ int bt_a2dp_stream_send(struct bt_a2dp_stream *stream, struct net_buf *buf, uint
 	/* update sequence_number in the buf */
 	sys_put_be16(seq_num, (uint8_t *)&media_hdr->sequence_number);
 	/* send the buf */
-	return bt_avdtp_send_media_data(&stream->local_ep->sep, buf);
+	return bt_avdtp_send_media_data(&stream->local_ep->sep, buf,
+					a2dp_stream_sent_cb, stream);
 }
 #endif
 
