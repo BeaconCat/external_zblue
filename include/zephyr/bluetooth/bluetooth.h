@@ -275,6 +275,11 @@ static inline int bt_disable(void)
  * @return true when Bluetooth is ready, false otherwise
  */
 bool bt_is_ready_mc(uint8_t dev_id);
+
+typedef void (*bt_hci_hardware_error_cb_t)(uint8_t dev_id,
+					    uint8_t hardware_code);
+
+int bt_hci_hardware_error_cb_register(bt_hci_hardware_error_cb_t cb);
 #ifdef CONFIG_BT_ORIGINAL_API
 static inline bool bt_is_ready(void)
 {
