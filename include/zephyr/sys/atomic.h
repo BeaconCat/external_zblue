@@ -11,20 +11,10 @@
 
 #include <zephyr/types.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/atomic_types.h>
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-#include <nuttx/atomic.h>
-
-typedef int32_t atomic_val_t;
-#if INTPTR_MAX >= INT64_MAX
-typedef volatile int64_t atomic_ptr_t;
-typedef int64_t atomic_ptr_val_t;
-#else
-typedef volatile int32_t atomic_ptr_t;
-typedef int32_t atomic_ptr_val_t;
 #endif
 
 #include <zephyr/sys/atomic_port.h>
