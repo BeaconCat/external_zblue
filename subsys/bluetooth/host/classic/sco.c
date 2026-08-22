@@ -17,6 +17,7 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/buf.h>
 
 #include "common/bt_str.h"
 
@@ -32,9 +33,58 @@ LOG_MODULE_REGISTER(bt_sco);
 
 struct bt_sco_server *sco_server;
 
-#define SCO_CHAN(_sco) ((_sco)->sco.chan);
+NET_BUF_POOL_FIXED_DEFINE(sco_rx_pool, CONFIG_BT_MAX_SCO_CONN + 1,
+			  BT_BUF_SCO_SIZE(255), sizeof(struct bt_buf_data), NULL);
+NET_BUF_POOL_FIXED_DEFINE(sco_tx_pool, CONFIG_BT_MAX_SCO_CONN + 1,
+			  BT_BUF_SCO_SIZE(255), sizeof(struct bt_buf_data), NULL);
+
+#define SCO_CHAN(_sco) ((_sco)->sco.chan)
 
 static sys_slist_t sco_conn_cbs = SYS_SLIST_STATIC_INIT(&sco_conn_cbs);
+
+struct net_buf *bt_sco_get_rx(k_timeout_t timeout)
+{
+	struct net_buf *buf = net_buf_alloc(&sco_rx_pool, timeout);
+
+	if (buf != NULL) {
+		net_buf_reserve(buf, BT_BUF_RESERVE);
+		bt_buf_set_type(buf, BT_BUF_SCO_IN);
+	}
+	return buf;
+}
+
+int bt_sco_send(struct bt_conn *sco, const void *data, size_t len)
+{
+	struct bt_hci_sco_hdr *hdr;
+	struct net_buf *buf;
+
+	if (sco == NULL || sco->type != BT_CONN_TYPE_SCO ||
+	    data == NULL || len > 255) {
+		return -EINVAL;
+	}
+
+	buf = net_buf_alloc(&sco_tx_pool, K_NO_WAIT);
+	if (buf == NULL) {
+		return -ENOMEM;
+	}
+	net_buf_reserve(buf, BT_BUF_RESERVE);
+	bt_buf_set_type(buf, BT_BUF_SCO_OUT);
+	hdr = net_buf_add(buf, sizeof(*hdr));
+	hdr->handle = sys_cpu_to_le16(sco->handle & 0x0fff);
+	hdr->len = len;
+	net_buf_add_mem(buf, data, len);
+	return bt_send(sco->hdev, buf);
+}
+
+void bt_sco_recv(struct bt_conn *sco, struct net_buf *buf,
+		 uint8_t packet_status)
+{
+	struct bt_sco_chan *chan = SCO_CHAN(sco);
+
+	if (chan != NULL && chan->ops != NULL && chan->ops->recv != NULL) {
+		chan->ops->recv(chan, buf, packet_status);
+	}
+}
 
 int bt_sco_server_register(struct bt_sco_server *server)
 {
