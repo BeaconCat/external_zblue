@@ -406,6 +406,8 @@ static int h4_open(const struct device *dev, bt_hci_recv_t recv, void *hci_data)
 	}
 
 	h4->fd = ret;
+	h4->recv = recv;
+	h4->hci_data = hci_data;
 	LOG_DBG("H4: %s opened as fd %d", dev_name, h4->fd);
 
 	ret = (int)k_thread_create(&h4->rx_thread_data, h4->rx_thread_stack,
@@ -417,9 +419,6 @@ static int h4_open(const struct device *dev, bt_hci_recv_t recv, void *hci_data)
 	} else {
 		ret = 0;
 	}
-
-	h4->recv = recv;
-	h4->hci_data = hci_data;
 
 	ret = snprintf(dev_name, sizeof(dev_name), "BT Driver %s", dev->name);
 	if (ret < 0 || ret >= sizeof(dev_name)) {
