@@ -1433,9 +1433,13 @@ static void l2cap_br_conf_req(struct bt_l2cap_br *l2cap, uint8_t ident,
 		return;
 	}
 
+	/* The Basic L2CAP MTU defaults to 672 when the peer omits the MTU
+	 * option. Other options, such as Flush Timeout, do not change it.
+	 */
+	BR_CHAN(chan)->tx.mtu = L2CAP_BR_DEFAULT_MTU;
+
 	if (!opt_len) {
 		LOG_DBG("tx default MTU %u", L2CAP_BR_DEFAULT_MTU);
-		BR_CHAN(chan)->tx.mtu = L2CAP_BR_DEFAULT_MTU;
 		goto send_rsp;
 	}
 
