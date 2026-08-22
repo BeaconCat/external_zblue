@@ -2150,6 +2150,7 @@ void bt_l2cap_br_init(struct bt_dev *hdev)
 	hdev->l2cap_br_ctx = &l2cap_br_ctx_pool[hdev->dev_id];
 	hdev->l2cap_br_ctx->hdev = hdev;
 	hdev->l2cap_br_ctx->ident = 0;
+	bt_sdp_init(hdev);
 
 	if (IS_ENABLED(CONFIG_BT_RFCOMM)) {
 		bt_rfcomm_init();
@@ -2166,8 +2167,6 @@ void bt_l2cap_br_init(struct bt_dev *hdev)
 	if (IS_ENABLED(CONFIG_BT_AVRCP)) {
 		bt_avrcp_init();
 	}
-
-	bt_sdp_init(hdev);
 
 	if (IS_ENABLED(CONFIG_BT_A2DP)) {
 		bt_a2dp_init();
