@@ -2536,7 +2536,8 @@ int bt_avdtp_delay_report(struct bt_avdtp *session, struct bt_avdtp_delay_report
 	return avdtp_send_cmd(session, buf, &param->req);
 }
 
-int bt_avdtp_send_media_data(struct bt_avdtp_sep *sep, struct net_buf *buf)
+int bt_avdtp_send_media_data(struct bt_avdtp_sep *sep, struct net_buf *buf,
+			     bt_conn_tx_cb_t cb, void *user_data)
 {
 	int err;
 
@@ -2544,7 +2545,7 @@ int bt_avdtp_send_media_data(struct bt_avdtp_sep *sep, struct net_buf *buf)
 		return -EIO;
 	}
 
-	err = bt_l2cap_chan_send(&sep->chan.chan, buf);
+	err = bt_l2cap_br_chan_send_cb(&sep->chan.chan, buf, cb, user_data);
 	if (err < 0) {
 		LOG_ERR("Error:L2CAP send fail - err = %d", err);
 		return err;
