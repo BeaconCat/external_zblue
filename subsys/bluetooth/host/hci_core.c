@@ -60,6 +60,7 @@
 
 #if defined(CONFIG_BT_CLASSIC)
 #include "classic/br.h"
+#include "classic/sco_internal.h"
 #endif
 
 #if defined(CONFIG_BT_DF)
@@ -739,6 +740,41 @@ static void hci_acl(struct bt_dev *hdev, struct net_buf *buf)
 	bt_conn_recv(conn, buf, flags);
 	bt_conn_unref(conn);
 }
+
+#if defined(CONFIG_BT_CLASSIC)
+static void hci_sco(struct bt_dev *hdev, struct net_buf *buf)
+{
+	struct bt_hci_sco_hdr *hdr;
+	struct bt_conn *conn;
+	uint16_t handle;
+	uint8_t len;
+	uint8_t packet_status;
+
+	if (buf->len < sizeof(*hdr)) {
+		net_buf_unref(buf);
+		return;
+	}
+
+	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
+	handle = sys_le16_to_cpu(hdr->handle);
+	len = hdr->len;
+	packet_status = (handle >> 12) & 0x03;
+	handle &= 0x0fff;
+	if (buf->len != len) {
+		net_buf_unref(buf);
+		return;
+	}
+
+	conn = bt_conn_lookup_handle(hdev, handle, BT_CONN_TYPE_SCO);
+	if (conn == NULL) {
+		net_buf_unref(buf);
+		return;
+	}
+	bt_sco_recv(conn, buf, packet_status);
+	bt_conn_unref(conn);
+	net_buf_unref(buf);
+}
+#endif
 
 static void hci_data_buf_overflow(struct bt_dev *hdev, struct net_buf *buf)
 {
@@ -4265,6 +4301,11 @@ static int bt_recv_unsafe(struct bt_dev *hdev, struct net_buf *buf)
 	case BT_BUF_ACL_IN:
 		rx_queue_put(hdev, buf);
 		return 0;
+#if defined(CONFIG_BT_CLASSIC)
+	case BT_BUF_SCO_IN:
+		rx_queue_put(hdev, buf);
+		return 0;
+#endif
 #endif /* BT_CONN */
 	case BT_BUF_EVT:
 	{
@@ -4401,52 +4442,35 @@ static void init_work(struct k_work *work)
 
 static void rx_work_handler(struct k_work *work)
 {
-	int err;
 	struct net_buf *buf;
 	struct bt_dev *hdev = CONTAINER_OF(work, struct bt_dev, rx_work);
-
 	LOG_DBG("dev:%d, Getting net_buf from queue", hdev->dev_id);
-	buf = net_buf_slist_get(&hdev->rx_queue);
-	if (!buf) {
-		return;
-	}
+	while ((buf = net_buf_slist_get(&hdev->rx_queue)) != NULL) {
+		LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf), buf->len);
 
-	LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf), buf->len);
-
-	switch (bt_buf_get_type(buf)) {
+		switch (bt_buf_get_type(buf)) {
 #if defined(CONFIG_BT_CONN)
-	case BT_BUF_ACL_IN:
-		hci_acl(hdev, buf);
-		break;
+		case BT_BUF_ACL_IN:
+			hci_acl(hdev, buf);
+			break;
+#if defined(CONFIG_BT_CLASSIC)
+		case BT_BUF_SCO_IN:
+			hci_sco(hdev, buf);
+			break;
+#endif
 #endif /* CONFIG_BT_CONN */
 #if defined(CONFIG_BT_ISO)
-	case BT_BUF_ISO_IN:
-		hci_iso(hdev, buf);
-		break;
+		case BT_BUF_ISO_IN:
+			hci_iso(hdev, buf);
+			break;
 #endif /* CONFIG_BT_ISO */
-	case BT_BUF_EVT:
-		hci_event(hdev, buf);
-		break;
-	default:
-		LOG_ERR("Unknown buf type %u", bt_buf_get_type(buf));
-		net_buf_unref(buf);
-		break;
-	}
-
-	/* Schedule the work handler to be executed again if there are
-	 * additional items in the queue. This allows for other users of the
-	 * work queue to get a chance at running, which wouldn't be possible if
-	 * we used a while() loop with a k_yield() statement.
-	 */
-	if (!sys_slist_is_empty(&hdev->rx_queue)) {
-
-#if defined(CONFIG_BT_RECV_WORKQ_SYS)
-		err = k_work_submit(&hdev->rx_work);
-#elif defined(CONFIG_BT_RECV_WORKQ_BT)
-		err = k_work_submit_to_queue(&bt_workq, &hdev->rx_work);
-#endif
-		if (err < 0) {
-			LOG_ERR("Could not submit rx_work: %d", err);
+		case BT_BUF_EVT:
+			hci_event(hdev, buf);
+			break;
+		default:
+			LOG_ERR("Unknown buf type %u", bt_buf_get_type(buf));
+			net_buf_unref(buf);
+			break;
 		}
 	}
 }
