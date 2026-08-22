@@ -184,6 +184,9 @@ struct bt_hfp_hf_cb {
 	 *  @param sco_conn SCO/eSCO Connection object.
 	 */
 	void (*sco_connected)(struct bt_hfp_hf *hf, struct bt_conn *sco_conn);
+	/** Incoming SCO/eSCO audio payload from the controller. */
+	void (*sco_recv)(struct bt_hfp_hf *hf, const uint8_t *data,
+			 size_t len, uint8_t packet_status);
 	/** HF SCO/eSCO disconnected Callback
 	 *
 	 *  If this callback is provided it will be called whenever the
@@ -853,6 +856,10 @@ int Z_API(bt_hfp_hf_redial)(struct bt_hfp_hf *hf);
  *  @return 0 in case of success or negative value in case of error.
  */
 int Z_API(bt_hfp_hf_audio_connect)(struct bt_hfp_hf *hf);
+
+/** Send one HCI SCO/eSCO audio payload. */
+int Z_API(bt_hfp_hf_sco_send)(struct bt_hfp_hf *hf,
+			      const void *data, size_t len);
 
 /** @brief Handsfree HF set selected codec id
  *
