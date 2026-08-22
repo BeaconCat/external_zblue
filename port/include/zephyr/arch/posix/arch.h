@@ -32,7 +32,7 @@ extern "C" {
 #include <zephyr/arch/common/ffs.h>
 #include <nuttx/spinlock.h>
 
-#ifdef CONFIG_64BIT
+#if defined(CONFIG_64BIT) || defined(CONFIG_ARCH_64BIT)
 #define ARCH_STACK_PTR_ALIGN 16
 #else
 #define ARCH_STACK_PTR_ALIGN 8
