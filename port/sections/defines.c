@@ -141,6 +141,14 @@ extern struct net_buf_pool ag_pool;
 extern struct net_buf_pool hf_pool;
 extern struct net_buf_pool br_sig_pool;
 extern struct net_buf_pool sdp_pool;
+extern struct net_buf_pool sco_rx_pool;
+extern struct net_buf_pool sco_tx_pool;
+extern struct net_buf_pool avdtp_pool;
+extern struct net_buf_pool avdtp_frag_pool;
+extern struct net_buf_pool avrcp_vd_rx_pool;
+extern struct net_buf_pool avctp_ctrl_rx_pool;
+extern struct net_buf_pool avctp_ctrl_tx_pool;
+extern struct net_buf_pool avrcp_vd_tx_pool;
 extern struct net_buf_pool data_pool;
 extern struct net_buf_pool sdp_client_pool;
 extern struct net_buf_pool pool;
@@ -204,11 +212,26 @@ struct net_buf_pool *_net_buf_pool_list[] = {
 #if defined(CONFIG_BT_CHANNEL_SOUNDING)
 	&reassembly_buf_pool,
 #endif /* CONFIG_BT_CHANNEL_SOUNDING */
+#if defined(CONFIG_BT_SAMPLE_BAP_UNICAST_SERVER)
+	&tx_pool,
+#endif /* CONFIG_BT_SAMPLE_BAP_UNICAST_SERVER */
 #endif /* CONFIG_BT_HCI_HOST */
 
 #if defined(CONFIG_BT_CLASSIC)
 	&br_sig_pool,
 	&sdp_pool,
+	&sco_rx_pool,
+	&sco_tx_pool,
+#if defined(CONFIG_BT_AVDTP)
+	&avdtp_pool,
+	&avdtp_frag_pool,
+#endif /* CONFIG_BT_AVDTP */
+#if defined(CONFIG_BT_AVRCP)
+	&avrcp_vd_rx_pool,
+	&avctp_ctrl_rx_pool,
+	&avctp_ctrl_tx_pool,
+	&avrcp_vd_tx_pool,
+#endif /* CONFIG_BT_AVRCP */
 #if defined(CONFIG_BT_A2DP_SOURCE)
 	&bt_a2dp_tx_pool,
 #endif /* CONFIG_BT_A2DP_SOURCE */
