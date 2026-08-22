@@ -24,6 +24,7 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net_buf.h>
+#include <zephyr/settings/settings.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>
@@ -67,6 +68,8 @@ static const struct bt_bap_qos_cfg_pref qos_pref =
 	BT_BAP_QOS_CFG_PREF(true, BT_GAP_LE_PHY_2M, 0x02, 10, 40000, 40000, 40000, 40000);
 
 static K_SEM_DEFINE(sem_disconnected, 0, 1);
+
+extern void z_sys_init(void);
 
 static uint8_t unicast_server_addata[] = {
 	BT_UUID_16_ENCODE(BT_UUID_ASCS_VAL), /* ASCS UUID */
@@ -640,7 +643,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	k_sem_give(&sem_disconnected);
 }
 
-BT_CONN_CB_DEFINE(conn_callbacks) = {
+static struct bt_conn_cb conn_callbacks = {
 	.connected = connected,
 	.disconnected = disconnected,
 };
@@ -740,9 +743,9 @@ static int set_available_contexts(void)
 
 int main(void)
 {
-	struct bt_le_ext_adv *adv;
 	int err;
 
+	z_sys_init();
 	err = bt_enable(NULL);
 	if (err != 0) {
 		printk("Bluetooth init failed (err %d)\n", err);
@@ -751,11 +754,34 @@ int main(void)
 
 	printk("Bluetooth initialized\n");
 
-	bt_bap_unicast_server_register(&param);
-	bt_bap_unicast_server_register_cb(&unicast_server_cb);
+	if (IS_ENABLED(CONFIG_SETTINGS)) {
+		settings_load();
+	}
+	bt_conn_cb_register(&conn_callbacks);
 
-	bt_pacs_cap_register(BT_AUDIO_DIR_SINK, &cap_sink);
-	bt_pacs_cap_register(BT_AUDIO_DIR_SOURCE, &cap_source);
+	err = bt_bap_unicast_server_register(&param);
+	if (err != 0) {
+		printk("Failed to register unicast server (err %d)\n", err);
+		return 0;
+	}
+
+	err = bt_bap_unicast_server_register_cb(&unicast_server_cb);
+	if (err != 0) {
+		printk("Failed to register unicast server callbacks (err %d)\n", err);
+		return 0;
+	}
+
+	err = bt_pacs_cap_register(BT_AUDIO_DIR_SINK, &cap_sink);
+	if (err != 0) {
+		printk("Failed to register sink capability (err %d)\n", err);
+		return 0;
+	}
+
+	err = bt_pacs_cap_register(BT_AUDIO_DIR_SOURCE, &cap_source);
+	if (err != 0) {
+		printk("Failed to register source capability (err %d)\n", err);
+		return 0;
+	}
 
 	for (size_t i = 0; i < ARRAY_SIZE(sink_streams); i++) {
 		bt_bap_stream_cb_register(&sink_streams[i], &stream_ops);
@@ -781,23 +807,10 @@ int main(void)
 		return 0;
 	}
 
-	/* Create a connectable advertising set */
-	err = bt_le_ext_adv_create(BT_LE_EXT_ADV_CONN, NULL, &adv);
-	if (err) {
-		printk("Failed to create advertising set (err %d)\n", err);
-		return 0;
-	}
-
-	err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), NULL, 0);
-	if (err) {
-		printk("Failed to set advertising data (err %d)\n", err);
-		return 0;
-	}
-
 	while (true) {
 		struct k_work_sync sync;
 
-		err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
+		err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), NULL, 0);
 		if (err) {
 			printk("Failed to start advertising set (err %d)\n", err);
 			return 0;

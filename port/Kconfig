@@ -228,5 +228,12 @@ config BT_SAMPLE_HFP_HF
   help
     Enable Bluetooth hfp-hf example
 
+config BT_SAMPLE_BAP_UNICAST_SERVER
+  bool "Enable Bluetooth BAP unicast server example"
+  default n
+  depends on BT_BAP_UNICAST_SERVER
+  help
+    Enable the Bluetooth LE Audio BAP unicast server example.
+
 endif
 
