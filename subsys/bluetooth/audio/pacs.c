@@ -981,7 +981,7 @@ static void pacs_security_changed(struct bt_conn *conn, bt_security_t level,
 		return;
 	}
 
-	if (!bt_addr_le_is_bonded(conn->id, &conn->le.dst)) {
+	if (!bt_addr_le_is_bonded(conn->hdev, conn->id, &conn->le.dst)) {
 		return;
 	}
 
