@@ -27,6 +27,13 @@
 #include "host/shell/bt.h"
 #include "common/bt_shell_private.h"
 
+#if !defined(CONFIG_BT_SHELL)
+#define bt_shell_print(_fmt, ...) printk(_fmt "\n", ##__VA_ARGS__)
+#define bt_shell_info(_fmt, ...)  printk(_fmt "\n", ##__VA_ARGS__)
+#define bt_shell_warn(_fmt, ...)  printk(_fmt "\n", ##__VA_ARGS__)
+#define bt_shell_error(_fmt, ...) printk(_fmt "\n", ##__VA_ARGS__)
+#endif
+
 struct bt_a2dp *default_a2dp;
 static uint8_t a2dp_sink_sdp_registered;
 static uint8_t a2dp_source_sdp_registered;
@@ -40,26 +47,46 @@ static struct bt_a2dp_ep peer_sbc_endpoint = {
 static struct bt_a2dp_ep *found_peer_sbc_endpoint;
 static struct bt_a2dp_ep *registered_sbc_endpoint;
 static struct bt_a2dp_stream sbc_stream;
+static struct bt_a2dp_stream sink_sbc_stream;
 static struct bt_a2dp_stream_ops stream_ops;
+static struct k_work_delayable source_test_work;
+static struct k_work_delayable source_connect_work;
+static struct k_work_delayable source_start_work;
+static struct k_work_delayable source_media_work;
+static struct bt_conn *source_test_conn;
+static struct bt_a2dp_stream *source_test_stream;
+static bool source_test_enabled;
+static uint16_t source_test_sequence;
+static uint16_t source_test_sent;
+static uint8_t source_test_retry;
+static uint8_t source_start_retry;
+static uint32_t sink_media_packets;
+static uint32_t sink_media_frames;
+static uint32_t sink_media_bytes;
+
+static void source_test_discover(struct k_work *work);
+static void source_test_connect(struct k_work *work);
+static void source_test_start(struct k_work *work);
+static void source_test_send_media(struct k_work *work);
+static int source_test_send_frame(struct bt_a2dp_stream *stream);
 
 #if defined(CONFIG_BT_A2DP_SOURCE)
 static uint8_t media_data[] = {
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	0x9c, 0xbd, 0x05, 0xc0, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x6b, 0x5a, 0xd6,
+	0xb5, 0xad, 0x6b, 0x5a, 0xd6, 0xb5, 0xad,
 };
 #endif
 
-NET_BUF_POOL_DEFINE(a2dp_tx_pool, CONFIG_BT_MAX_CONN,
-		BT_L2CAP_BUF_SIZE(CONFIG_BT_L2CAP_TX_MTU),
-		CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
+#if !defined(CONFIG_BT_SAMPLE_PERIPHERAL)
+NET_BUF_POOL_FIXED_DEFINE(a2dp_tx_pool, CONFIG_BT_MAX_CONN,
+			  BT_L2CAP_BUF_SIZE(CONFIG_BT_L2CAP_TX_MTU),
+			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
+#define A2DP_TX_POOL a2dp_tx_pool
+#else
+extern struct net_buf_pool bt_a2dp_tx_pool;
+#define A2DP_TX_POOL bt_a2dp_tx_pool
+#endif
 
 static struct bt_sdp_attribute a2dp_sink_attrs[] = {
 	BT_SDP_NEW_SERVICE,
@@ -291,6 +318,7 @@ void app_connected(struct bt_a2dp *a2dp, int err)
 {
 	if (!err) {
 		default_a2dp = a2dp;
+		source_test_retry = 0;
 		bt_shell_print("a2dp connected");
 	} else {
 		bt_shell_print("a2dp connecting fail");
@@ -299,8 +327,27 @@ void app_connected(struct bt_a2dp *a2dp, int err)
 
 void app_disconnected(struct bt_a2dp *a2dp)
 {
+	struct bt_conn *conn;
+
+	k_work_cancel_delayable(&source_start_work);
+	k_work_cancel_delayable(&source_media_work);
+	source_test_stream = NULL;
 	found_peer_sbc_endpoint = NULL;
+	default_a2dp = NULL;
 	bt_shell_print("a2dp disconnected");
+	if (!source_test_enabled || source_test_retry >= 5 ||
+	    source_test_conn != NULL) {
+		return;
+	}
+
+	conn = bt_a2dp_get_conn(a2dp);
+	if (conn != NULL) {
+		source_test_retry++;
+		source_test_conn = conn;
+		bt_shell_print("A2DP source retry scheduled: %u/5",
+			       source_test_retry);
+		k_work_reschedule(&source_connect_work, K_SECONDS(3));
+	}
 }
 
 int app_config_req(struct bt_a2dp *a2dp, struct bt_a2dp_ep *ep,
@@ -309,8 +356,15 @@ int app_config_req(struct bt_a2dp *a2dp, struct bt_a2dp_ep *ep,
 {
 	uint32_t sample_rate;
 
-	bt_a2dp_stream_cb_register(&sbc_stream, &stream_ops);
-	*stream = &sbc_stream;
+	if (ep == &source_sbc_endpoint) {
+		bt_a2dp_stream_cb_register(&sbc_stream, &stream_ops);
+		*stream = &sbc_stream;
+		bt_shell_print("receive source endpoint config request");
+	} else {
+		bt_a2dp_stream_cb_register(&sink_sbc_stream, &stream_ops);
+		*stream = &sink_sbc_stream;
+		bt_shell_print("receive sink endpoint config request");
+	}
 	*rsp_err_code = 0;
 
 	bt_shell_print("receive requesting config and accept");
@@ -339,6 +393,10 @@ void app_config_rsp(struct bt_a2dp_stream *stream, uint8_t rsp_err_code)
 {
 	if (rsp_err_code == 0) {
 		bt_shell_print("success to configure");
+		if (source_test_enabled) {
+			bt_shell_print("A2DP source establish: %d",
+				       bt_a2dp_stream_establish(stream));
+		}
 	} else {
 		bt_shell_print("fail to configure");
 	}
@@ -355,6 +413,10 @@ void app_establish_rsp(struct bt_a2dp_stream *stream, uint8_t rsp_err_code)
 {
 	if (rsp_err_code == 0) {
 		bt_shell_print("success to establish");
+		if (source_test_enabled) {
+			bt_shell_print("A2DP source start: %d",
+				       bt_a2dp_stream_start(stream));
+		}
 	} else {
 		bt_shell_print("fail to establish");
 	}
@@ -416,21 +478,48 @@ void stream_configured(struct bt_a2dp_stream *stream)
 void stream_established(struct bt_a2dp_stream *stream)
 {
 	bt_shell_print("stream established");
+	if (source_test_enabled) {
+		source_test_stream = stream;
+		source_test_sequence = 0;
+		source_test_sent = 0;
+		source_start_retry = 0;
+		k_work_reschedule(&source_start_work, K_MSEC(10));
+	}
 }
 
 void stream_released(struct bt_a2dp_stream *stream)
 {
 	bt_shell_print("stream released");
+	if (stream == source_test_stream) {
+		k_work_cancel_delayable(&source_start_work);
+		k_work_cancel_delayable(&source_media_work);
+		source_test_stream = NULL;
+	}
 }
 
 void stream_started(struct bt_a2dp_stream *stream)
 {
 	bt_shell_print("stream started");
+	if (source_test_enabled) {
+		source_test_stream = stream;
+		bt_shell_print("A2DP source media MTU: %u", bt_a2dp_get_mtu(stream));
+		k_work_reschedule(&source_media_work, K_MSEC(10));
+	} else {
+		sink_media_packets = 0;
+		sink_media_frames = 0;
+		sink_media_bytes = 0;
+	}
 }
 
 void stream_suspended(struct bt_a2dp_stream *stream)
 {
 	bt_shell_print("stream suspended");
+	if (!source_test_enabled && sink_media_packets != 0U) {
+		bt_shell_print("A2DP sink media summary: packets=%lu frames=%lu bytes=%lu",
+			       (unsigned long)sink_media_packets,
+			       (unsigned long)sink_media_frames,
+			       (unsigned long)sink_media_bytes);
+	}
 }
 
 void sink_sbc_streamer_data(struct bt_a2dp_stream *stream, struct net_buf *buf,
@@ -442,10 +531,15 @@ void sink_sbc_streamer_data(struct bt_a2dp_stream *stream, struct net_buf *buf,
 		return;
 	}
 	sbc_hdr = net_buf_pull_u8(buf);
-	bt_shell_print("received, num of frames: %d, data length:%d",
-		       (uint8_t)BT_A2DP_SBC_MEDIA_HDR_NUM_FRAMES_GET(sbc_hdr), buf->len);
-	bt_shell_print("data: %d, %d, %d, %d, %d, %d ......", buf->data[0],
-		buf->data[1], buf->data[2], buf->data[3], buf->data[4], buf->data[5]);
+	sink_media_packets++;
+	sink_media_frames += (uint8_t)BT_A2DP_SBC_MEDIA_HDR_NUM_FRAMES_GET(sbc_hdr);
+	sink_media_bytes += buf->len;
+	if (sink_media_packets == 1U || (sink_media_packets % 256U) == 0U) {
+		bt_shell_print("A2DP sink media: packets=%lu frames=%lu bytes=%lu seq=%u",
+			       (unsigned long)sink_media_packets,
+			       (unsigned long)sink_media_frames,
+			       (unsigned long)sink_media_bytes, seq_num);
+	}
 }
 
 void stream_recv(struct bt_a2dp_stream *stream,
@@ -491,6 +585,62 @@ struct bt_a2dp_cb a2dp_cb = {
 	.delay_report_rsp = app_delay_report_rsp,
 #endif
 };
+
+int bt_shell_a2dp_register(void)
+{
+	int err;
+
+	if (a2dp_initied) {
+		return 0;
+	}
+	k_work_init_delayable(&source_test_work, source_test_discover);
+	k_work_init_delayable(&source_connect_work, source_test_connect);
+	k_work_init_delayable(&source_start_work, source_test_start);
+	k_work_init_delayable(&source_media_work, source_test_send_media);
+
+	err = bt_a2dp_register_cb(&a2dp_cb);
+	if (err) {
+		return err;
+	}
+	if (!source_test_enabled) {
+		err = bt_sdp_register_service(&a2dp_sink_rec);
+		if (err) {
+			return err;
+		}
+		err = bt_a2dp_register_ep(&sink_sbc_endpoint, BT_AVDTP_AUDIO,
+					  BT_AVDTP_SINK);
+		if (err) {
+			return err;
+		}
+	}
+	err = bt_sdp_register_service(&a2dp_source_rec);
+	if (err) {
+		return err;
+	}
+	err = bt_a2dp_register_ep(&source_sbc_endpoint, BT_AVDTP_AUDIO,
+				  BT_AVDTP_SOURCE);
+	if (!err) {
+		a2dp_initied = 1;
+	}
+	return err;
+}
+
+static void source_test_sent_cb(struct bt_a2dp_stream *stream)
+{
+	if (!source_test_enabled) {
+		return;
+	}
+
+	source_test_sent++;
+	bt_shell_print("A2DP source media sent: %u/10", source_test_sent);
+	if (source_test_sent == 10) {
+		source_test_enabled = false;
+		bt_shell_print("A2DP source suspend: %d",
+			       bt_a2dp_stream_suspend(stream));
+	} else {
+		k_work_reschedule(&source_media_work, K_NO_WAIT);
+	}
+}
 
 static int cmd_register_cb(const struct shell *sh, int32_t argc, char *argv[])
 {
@@ -621,7 +771,7 @@ static struct bt_a2dp_stream_ops stream_ops = {
 	.recv = stream_recv,
 #endif
 #if defined(CONFIG_BT_A2DP_SOURCE)
-	.sent = NULL,
+	.sent = source_test_sent_cb,
 	.delay_report = delay_report,
 #endif
 };
@@ -681,10 +831,23 @@ static uint8_t bt_a2dp_discover_peer_endpoint_cb(struct bt_a2dp *a2dp,
 		bt_shell_print("find one endpoint");
 		shell_a2dp_print_capabilities(info);
 		if ((info->codec_type == BT_A2DP_SBC) &&
+		    (info->sep_info->tsep == BT_AVDTP_SINK) &&
 		    (ep != NULL)) {
 			*ep = &peer_sbc_endpoint;
 			found_peer_sbc_endpoint = &peer_sbc_endpoint;
 		}
+	} else if (source_test_enabled) {
+		if (found_peer_sbc_endpoint == NULL) {
+			bt_shell_print("A2DP source peer sink not found");
+			return BT_A2DP_DISCOVER_EP_STOP;
+		}
+
+		bt_a2dp_stream_cb_register(&sbc_stream, &stream_ops);
+		bt_shell_print("A2DP source configure: %d",
+			       bt_a2dp_stream_config(a2dp, &sbc_stream,
+					     &source_sbc_endpoint,
+					     found_peer_sbc_endpoint,
+					     &sbc_cfg_default));
 	}
 	return BT_A2DP_DISCOVER_EP_CONTINUE;
 }
@@ -696,6 +859,111 @@ struct bt_a2dp_discover_param discover_param = {
 	.seps_info = &found_seps[0],
 	.sep_count = 5,
 };
+
+static void source_test_discover(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	found_peer_sbc_endpoint = NULL;
+	if (default_a2dp == NULL) {
+		bt_shell_print("A2DP source test has no connection");
+		return;
+	}
+
+	bt_shell_print("A2DP source discover: %d",
+		       bt_a2dp_discover(default_a2dp, &discover_param));
+}
+
+static void source_test_connect(struct k_work *work)
+{
+	struct bt_conn *conn = source_test_conn;
+
+	ARG_UNUSED(work);
+	source_test_conn = NULL;
+	if (conn == NULL) {
+		return;
+	}
+
+	default_a2dp = bt_a2dp_connect(conn);
+	bt_shell_print("A2DP source signaling connect: %s",
+		       default_a2dp != NULL ? "started" : "failed");
+	bt_conn_unref(conn);
+}
+
+static void source_test_start(struct k_work *work)
+{
+	int err;
+
+	ARG_UNUSED(work);
+	if (source_test_stream == NULL) {
+		return;
+	}
+
+	err = bt_a2dp_stream_start(source_test_stream);
+	bt_shell_print("A2DP source start after establish: %d", err);
+	if ((err == -ENOMEM || err == -EBUSY || err == -EAGAIN) &&
+	    source_start_retry < 5) {
+		source_start_retry++;
+		k_work_reschedule(&source_start_work, K_MSEC(200));
+	}
+}
+
+static void source_test_send_media(struct k_work *work)
+{
+	int err;
+
+	ARG_UNUSED(work);
+	if (source_test_stream == NULL) {
+		return;
+	}
+
+	err = source_test_send_frame(source_test_stream);
+	if (err < 0) {
+		bt_shell_print("A2DP source media send failed: %d", err);
+	}
+}
+
+static int source_test_send_frame(struct bt_a2dp_stream *stream)
+{
+#if defined(CONFIG_BT_A2DP_SOURCE)
+	struct net_buf *buf;
+	int err;
+
+	buf = bt_a2dp_stream_create_pdu(&A2DP_TX_POOL, K_NO_WAIT);
+	if (buf == NULL) {
+		return -ENOMEM;
+	}
+
+	net_buf_add_u8(buf, (uint8_t)BT_A2DP_SBC_MEDIA_HDR_ENCODE(1, 0, 0, 0));
+	net_buf_add_mem(buf, media_data, sizeof(media_data));
+	err = bt_a2dp_stream_send(stream, buf, source_test_sequence++, 0);
+	if (err < 0) {
+		net_buf_unref(buf);
+	}
+	return err;
+#else
+	return -ENOTSUP;
+#endif
+}
+
+int bt_shell_a2dp_source_test_enable(void)
+{
+	source_test_enabled = true;
+	if (default_a2dp != NULL) {
+		k_work_reschedule(&source_test_work, K_MSEC(1500));
+	}
+	return 0;
+}
+
+int bt_shell_a2dp_source_test_connect(struct bt_conn *conn)
+{
+	if (!source_test_enabled || conn == NULL || source_test_conn != NULL ||
+	    default_a2dp != NULL) {
+		return -EINVAL;
+	}
+
+	source_test_conn = bt_conn_ref(conn);
+	return k_work_reschedule(&source_connect_work, K_SECONDS(5));
+}
 
 static int cmd_get_peer_eps(const struct shell *sh, int32_t argc, char *argv[])
 {
@@ -792,7 +1060,7 @@ static int cmd_send_media(const struct shell *sh, int32_t argc, char *argv[])
 		return -ENOEXEC;
 	}
 
-	buf = bt_a2dp_stream_create_pdu(&a2dp_tx_pool, K_FOREVER);
+	buf = bt_a2dp_stream_create_pdu(&A2DP_TX_POOL, K_FOREVER);
 	if (buf == NULL) {
 		shell_error(sh, "fail to allocate buffer");
 		return -ENOEXEC;
