@@ -1449,6 +1449,7 @@ int bt_br_write_ext_inq_response_mc(uint8_t dev_id, uint8_t fec_required)
 	uint8_t type;
 	uint8_t *p;
 	struct bt_dev *hdev;
+	const char *name;
 
 	hdev = bt_dev_get(dev_id);
 	if (!hdev) {
@@ -1468,7 +1469,8 @@ int bt_br_write_ext_inq_response_mc(uint8_t dev_id, uint8_t fec_required)
 
 	/* Fill in EIR data (Name) */
 	eir_len -= 2;
-	name_len = strlen(hdev->name);
+	name = bt_get_name_mc(dev_id);
+	name_len = strlen(name);
 	if (name_len > eir_len) {
 		name_len = eir_len;
 		type = EIR_SHORT_NAME;
@@ -1480,13 +1482,7 @@ int bt_br_write_ext_inq_response_mc(uint8_t dev_id, uint8_t fec_required)
 
 	net_buf_add_u8(buf, name_len + 1);
 	net_buf_add_u8(buf, type);
-	net_buf_add_mem(buf, hdev->name, name_len);
-
-	/* TODO: Fill in EIR data (COD) */
-	/* TODO: Fill in EIR data (UUID) */
-	/* TODO: Fill in EIR data (Flags) */
-	/* TODO: Fill in EIR data (Manufacturer Specific Data) */
-	/* TODO: Fill in EIR data (TX Power) */
+	net_buf_add_mem(buf, name, name_len);
 
 	p = net_buf_add(buf, eir_len);
 	memset(p, 0, eir_len);
