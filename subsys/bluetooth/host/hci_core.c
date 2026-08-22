@@ -4572,8 +4572,12 @@ int bt_enable_mc(uint8_t dev_id, bt_ready_cb_t cb)
 	}	
 #endif
 
-	k_work_init(&hdev->rx_work, rx_work_handler);
-	k_work_init(&hdev->tx_work, tx_work_handler);
+	if (hdev->rx_work.handler == NULL) {
+		k_work_init(&hdev->rx_work, rx_work_handler);
+	}
+	if (hdev->tx_work.handler == NULL) {
+		k_work_init(&hdev->tx_work, tx_work_handler);
+	}
 
 #if DT_HAS_CHOSEN(zephyr_bt_hci)
 	err = bt_hci_open(hdev->hci, bt_hci_recv, hdev);
@@ -4597,6 +4601,7 @@ int bt_enable_mc(uint8_t dev_id, bt_ready_cb_t cb)
 
 int bt_disable_mc(uint8_t dev_id)
 {
+	struct net_buf *buf;
 	int err;
 	struct bt_dev *hdev;
 
@@ -4646,6 +4651,24 @@ int bt_disable_mc(uint8_t dev_id)
 	disconnected_handles_reset(hdev);
 #endif /* CONFIG_BT_CONN */
 
+	buf = net_buf_slist_get(&hdev->rx_queue);
+	while (buf != NULL) {
+		net_buf_unref(buf);
+		buf = net_buf_slist_get(&hdev->rx_queue);
+	}
+
+#if defined(CONFIG_BT_RECV_WORKQ_BT)
+	if (k_current_get() == &bt_workq.thread) {
+#else
+	if (k_current_get() == &k_sys_work_q.thread) {
+#endif
+		(void)k_work_cancel(&hdev->rx_work);
+	} else {
+		struct k_work_sync sync;
+
+		(void)k_work_cancel_sync(&hdev->rx_work, &sync);
+	}
+
 	/* Reset the Controller */
 	if (!drv_quirk_no_reset(hdev)) {
 
@@ -4678,12 +4701,6 @@ int bt_disable_mc(uint8_t dev_id)
 
 		return err;
 	}
-
-#if defined(CONFIG_BT_RECV_WORKQ_BT)
-	/* Abort RX thread */
-	k_thread_abort(&bt_workq.thread);
-	bt_workq.flags &= ~K_WORK_QUEUE_STARTED;
-#endif
 
 	/* Some functions rely on checking this bitfield */
 	memset(hdev->supported_commands, 0x00, sizeof(hdev->supported_commands));
