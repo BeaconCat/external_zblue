@@ -1288,6 +1288,7 @@ static uint16_t l2cap_br_conf_opt_flush_timeout(struct bt_l2cap_chan *chan,
 						struct net_buf *buf, size_t len)
 {
 	uint16_t result = BT_L2CAP_CONF_SUCCESS;
+	uint16_t timeout;
 	struct bt_l2cap_conf_opt_flush_timeout *opt_to;
 
 	if (len != sizeof(*opt_to)) {
@@ -1297,11 +1298,13 @@ static uint16_t l2cap_br_conf_opt_flush_timeout(struct bt_l2cap_chan *chan,
 	}
 
 	opt_to = (struct bt_l2cap_conf_opt_flush_timeout *)buf->data;
+	timeout = sys_le16_to_cpu(opt_to->timeout);
 
-	LOG_DBG("Flush timeout %u", opt_to->timeout);
-
-	opt_to->timeout = sys_cpu_to_le16(0xFFFF);
-	result = BT_L2CAP_CONF_UNACCEPT;
+	LOG_DBG("Flush timeout %u", timeout);
+	if (timeout != 0xffff) {
+		opt_to->timeout = sys_cpu_to_le16(0xffff);
+		result = BT_L2CAP_CONF_UNACCEPT;
+	}
 done:
 	return result;
 }
