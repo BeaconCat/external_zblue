@@ -25,6 +25,7 @@ enum bt_sco_state {
 };
 
 struct bt_sco_chan;
+struct net_buf;
 struct bt_sco_chan_ops {
 	/** @brief Channel connected callback
 	 *
@@ -45,6 +46,10 @@ struct bt_sco_chan_ops {
 	 *  @param reason BT_HCI_ERR_* reason for the disconnection.
 	 */
 	void (*disconnected)(struct bt_sco_chan *chan, uint8_t reason);
+
+	/** Incoming HCI SCO/eSCO payload. */
+	void (*recv)(struct bt_sco_chan *chan, struct net_buf *buf,
+		     uint8_t packet_status);
 };
 
 struct bt_sco_chan {
@@ -218,6 +223,11 @@ int bt_sco_conn_cb_register(struct bt_sco_conn_cb *cb);
  * @retval -ENOENT if @p cb was not registered.
  */
 int bt_sco_conn_cb_unregister(struct bt_sco_conn_cb *cb);
+
+struct net_buf *bt_sco_get_rx(k_timeout_t timeout);
+int bt_sco_send(struct bt_conn *sco, const void *data, size_t len);
+void bt_sco_recv(struct bt_conn *sco, struct net_buf *buf,
+		 uint8_t packet_status);
 
 /**
  *  @brief Register a callback structure for connection events.

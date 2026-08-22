@@ -38,6 +38,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/drivers/bluetooth.h>
+#include "host/classic/sco_internal.h"
 
 __attribute__((weak)) void btsnoop_log_capture(uint8_t is_receive,
 					       uint8_t *hci_pkt,
@@ -123,6 +124,8 @@ static struct net_buf *get_rx(const uint8_t *buf)
 		return bt_buf_get_evt(buf[1], discardable, timeout);
 	case BT_HCI_H4_ACL:
 		return bt_buf_get_rx(BT_BUF_ACL_IN, K_FOREVER);
+	case BT_HCI_H4_SCO:
+		return bt_sco_get_rx(K_FOREVER);
 	case BT_HCI_H4_ISO:
 		if (IS_ENABLED(CONFIG_BT_ISO)) {
 			return bt_buf_get_rx(BT_BUF_ISO_IN, K_FOREVER);
@@ -352,6 +355,9 @@ static int h4_send(const struct device *dev, struct net_buf *buf)
 	switch (bt_buf_get_type(buf)) {
 	case BT_BUF_ACL_OUT:
 		net_buf_push_u8(buf, BT_HCI_H4_ACL);
+		break;
+	case BT_BUF_SCO_OUT:
+		net_buf_push_u8(buf, BT_HCI_H4_SCO);
 		break;
 	case BT_BUF_CMD:
 		net_buf_push_u8(buf, BT_HCI_H4_CMD);
