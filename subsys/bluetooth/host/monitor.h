@@ -86,6 +86,10 @@ static inline uint8_t bt_monitor_opcode(struct net_buf *buf)
 		return BT_MONITOR_ACL_TX_PKT;
 	case BT_BUF_ACL_IN:
 		return BT_MONITOR_ACL_RX_PKT;
+	case BT_BUF_SCO_OUT:
+		return BT_MONITOR_SCO_TX_PKT;
+	case BT_BUF_SCO_IN:
+		return BT_MONITOR_SCO_RX_PKT;
 	case BT_BUF_ISO_OUT:
 		return BT_MONITOR_ISO_TX_PKT;
 	case BT_BUF_ISO_IN:
