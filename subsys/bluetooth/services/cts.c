@@ -110,7 +110,7 @@ static void ct_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 
 	LOG_INF("CTS Notifications %s", notif_enabled ? "enabled" : "disabled");
 
-	if (cts_cb->notification_changed) {
+	if (cts_cb != NULL && cts_cb->notification_changed != NULL) {
 		cts_cb->notification_changed(notif_enabled);
 	}
 }
@@ -120,6 +120,10 @@ static ssize_t read_ct(struct bt_conn *conn, const struct bt_gatt_attr *attr, vo
 {
 	int err;
 	struct bt_cts_time_format ct_time;
+
+	if (cts_cb == NULL || cts_cb->fill_current_cts_time == NULL) {
+		return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+	}
 
 	err = cts_cb->fill_current_cts_time(&ct_time);
 	ct_time.reason = BT_CTS_UPDATE_REASON_UNKNOWN;
@@ -137,7 +141,7 @@ static ssize_t write_ct(struct bt_conn *conn, const struct bt_gatt_attr *attr, c
 	int err;
 	struct bt_cts_time_format ct_time;
 
-	if (cts_cb->cts_time_write == NULL) {
+	if (cts_cb == NULL || cts_cb->cts_time_write == NULL) {
 		return BT_GATT_ERR(BT_ATT_ERR_INSUFFICIENT_RESOURCES);
 	}
 
@@ -170,8 +174,8 @@ BT_GATT_SERVICE_DEFINE(cts_svc, BT_GATT_PRIMARY_SERVICE(BT_UUID_CTS),
 
 int bt_cts_init(const struct bt_cts_cb *cb)
 {
-	__ASSERT(cb == NULL, "Current Time service need valid `struct bt_cts_cb` callback");
-	__ASSERT(cb->fill_current_cts_time == NULL,
+	__ASSERT(cb != NULL, "Current Time service needs a valid callback");
+	__ASSERT(cb == NULL || cb->fill_current_cts_time != NULL,
 		 "`fill_current_cts_time` callback api is required for functioning of CTS");
 	if (!cb || !cb->fill_current_cts_time) {
 		return -EINVAL;
@@ -184,6 +188,10 @@ int bt_cts_send_notification(enum bt_cts_update_reason reason)
 {
 	int err;
 	struct bt_cts_time_format ct_time;
+
+	if (cts_cb == NULL || cts_cb->fill_current_cts_time == NULL) {
+		return -EACCES;
+	}
 
 	err = cts_cb->fill_current_cts_time(&ct_time);
 	ct_time.reason = reason;
