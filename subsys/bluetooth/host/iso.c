@@ -788,7 +788,7 @@ static uint16_t iso_chan_max_data_len(const struct bt_iso_chan *chan)
 {
 	size_t max_controller_data_len;
 	uint16_t max_data_len;
-	struct bt_dev *hdev = chan->conn->hdev;
+	struct bt_dev *hdev = chan->iso->hdev;
 
 	if (chan->qos->tx == NULL) {
 		return 0;
@@ -1127,7 +1127,7 @@ static void store_cis_info(const struct bt_hci_evt_le_cis_established *evt,
 	peripheral->flush_timeout = info->iso_interval * evt->p_ft;
 }
 
-void hci_le_cis_established(struct net_buf *buf)
+void hci_le_cis_established(struct bt_dev *hdev, struct net_buf *buf)
 {
 	struct bt_hci_evt_le_cis_established *evt = (void *)buf->data;
 	uint16_t handle = sys_le16_to_cpu(evt->conn_handle);
@@ -1836,6 +1836,7 @@ static struct bt_iso_cig *get_free_cig(struct bt_dev *hdev)
 
 	for (size_t i = 0; i < ARRAY_SIZE(hdev->cigs); i++) {
 		if (hdev->cigs[i].state == BT_ISO_CIG_STATE_IDLE) {
+			hdev->cigs[i].hdev = hdev;
 			hdev->cigs[i].state = BT_ISO_CIG_STATE_CONFIGURED;
 			hdev->cigs[i].id = i;
 			sys_slist_init(&hdev->cigs[i].cis_channels);
@@ -2022,7 +2023,7 @@ static bool valid_cig_param(const struct bt_iso_cig_param *param, bool advanced,
 
 int bt_iso_cig_create_mc(uint8_t dev_id, const struct bt_iso_cig_param *param, struct bt_iso_cig **out_cig)
 {
-	int err;
+	int err = 0;
 	struct net_buf *rsp;
 	struct bt_iso_cig *cig;
 	struct bt_hci_rp_le_set_cig_params *cig_rsp;
@@ -2104,7 +2105,9 @@ int bt_iso_cig_create_mc(uint8_t dev_id, const struct bt_iso_cig_param *param, s
 
 	cig_rsp = (void *)rsp->data;
 
-	if (rsp->len < sizeof(cig_rsp) || cig_rsp->num_handles != param->num_cis) {
+	if (rsp->len < sizeof(*cig_rsp) +
+		       param->num_cis * sizeof(cig_rsp->handle[0]) ||
+	    cig_rsp->num_handles != param->num_cis) {
 		LOG_WRN("Unexpected response to hci_le_set_cig_params");
 		err = -EIO;
 		net_buf_unref(rsp);
@@ -2122,7 +2125,6 @@ int bt_iso_cig_create_mc(uint8_t dev_id, const struct bt_iso_cig_param *param, s
 
 	net_buf_unref(rsp);
 
-	cig->hdev = hdev;
 	*out_cig = cig;
 
 	return err;
@@ -2182,7 +2184,7 @@ int bt_iso_cig_reconfigure(struct bt_iso_cig *cig, const struct bt_iso_cig_param
 	/* Used to restore CIG in case of error */
 	existing_num_cis = cig->num_cis;
 
-	err = cig_init_cis(cig, param);
+	err = cig_init_cis(cig->hdev, cig, param);
 	if (err != 0) {
 		LOG_DBG("Could not init CIS %d", err);
 		restore_cig(cig, existing_num_cis);
@@ -2206,7 +2208,8 @@ int bt_iso_cig_reconfigure(struct bt_iso_cig *cig, const struct bt_iso_cig_param
 
 	cig_rsp = (void *)rsp->data;
 
-	if (rsp->len < sizeof(*cig_rsp)) {
+	if (rsp->len < sizeof(*cig_rsp) +
+		       param->num_cis * sizeof(cig_rsp->handle[0])) {
 		LOG_WRN("Unexpected response len to hci_le_set_cig_params %u != %zu", rsp->len,
 			sizeof(*cig_rsp));
 		err = -EIO;
@@ -2251,7 +2254,7 @@ int bt_iso_cig_terminate(struct bt_iso_cig *cig)
 		return -EINVAL;
 	}
 
-	err = hci_le_remove_cig(cig->id);
+	err = hci_le_remove_cig(cig, cig->id);
 	if (err != 0) {
 		LOG_DBG("Failed to terminate CIG: %d", err);
 		return err;
@@ -2512,7 +2515,7 @@ int bt_iso_chan_connect(const struct bt_iso_connect_param *param, size_t count)
 		}
 	}
 
-	if (iso_chans_connecting()) {
+	if (iso_chans_connecting(param[0].acl->hdev)) {
 		LOG_DBG("There are pending ISO connections");
 		return -EBUSY;
 	}
