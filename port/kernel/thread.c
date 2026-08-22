@@ -107,9 +107,9 @@ k_tid_t k_thread_create(struct k_thread *new_thread,
 
 	ret = pthread_create(&pid, &pattr, k_thread_main, _main);
 	pthread_attr_destroy(&pattr);
-	if (ret < 0) {
+	if (ret != 0) {
 		free(_main);
-		return (k_tid_t)-1;
+		return (k_tid_t)(intptr_t)-ret;
 	}
 
 #ifdef CONFIG_SMP
@@ -150,6 +150,10 @@ void k_thread_abort(k_tid_t thread)
 		sys_dlist_remove(&thread->base.qnode_dlist);
 	}
 
+	if (pthread_equal(pid, pthread_self())) {
+		pthread_exit(NULL);
+	}
+
 	pthread_cancel(pid);
-	pthread_detach(pid);
+	pthread_join(pid, NULL);
 }
