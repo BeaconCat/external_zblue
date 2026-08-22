@@ -256,7 +256,7 @@ static void h4_rx_thread(void *p1, void *p2, void *p3)
 				continue;
 			}
 
-			if (len == -EAGAIN) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				usleep(500);
 				continue;
 			}
@@ -265,6 +265,10 @@ static void h4_rx_thread(void *p1, void *p2, void *p3)
 			close(h4->fd);
 			h4->fd = -1;
 			return;
+		}
+		if (len == 0) {
+			usleep(500);
+			continue;
 		}
 
 		frame_size += len;
@@ -275,9 +279,11 @@ static void h4_rx_thread(void *p1, void *p2, void *p3)
 			const int32_t decoded_len = hci_packet_complete(frame_start, frame_size);
 
 			if (decoded_len == -1) {
-				LOG_ERR("HCI Packet type is invalid, length could not be decoded");
-				frame_size = 0; /* Drop buffer */
-				break;
+				LOG_WRN("Discarding invalid HCI packet type 0x%02x",
+					frame_start[0]);
+				frame_size--;
+				frame_start++;
+				continue;
 			}
 
 			if (decoded_len == 0) {
