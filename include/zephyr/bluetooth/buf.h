@@ -38,6 +38,10 @@ enum bt_buf_type {
 	BT_BUF_ACL_OUT,
 	/** Incoming ACL data */
 	BT_BUF_ACL_IN,
+	/** Outgoing synchronous SCO/eSCO data */
+	BT_BUF_SCO_OUT,
+	/** Incoming synchronous SCO/eSCO data */
+	BT_BUF_SCO_IN,
 	/** Outgoing ISO data */
 	BT_BUF_ISO_OUT,
 	/** Incoming ISO data */
@@ -59,6 +63,9 @@ struct bt_buf_data {
 
 /** Helper to calculate needed buffer size for HCI ACL packets */
 #define BT_BUF_ACL_SIZE(size) BT_BUF_SIZE(BT_HCI_ACL_HDR_SIZE + (size))
+
+/** Helper to calculate needed buffer size for HCI SCO packets */
+#define BT_BUF_SCO_SIZE(size) BT_BUF_SIZE(BT_HCI_SCO_HDR_SIZE + (size))
 
 /** Helper to calculate needed buffer size for HCI Event packets. */
 #define BT_BUF_EVT_SIZE(size) BT_BUF_SIZE(BT_HCI_EVT_HDR_SIZE + (size))
