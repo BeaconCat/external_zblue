@@ -193,7 +193,7 @@ static void bt_sdp_disconnected(struct bt_l2cap_chan *chan)
 	 * chan->destroy (l2cap_br_chan_destroy) to cancel rtx_work
 	 * and remove the wdog from g_wdactivelist.
 	 */
-	while ((buf = net_buf_get(&sdp->partial_resp_queue, K_NO_WAIT))) {
+	while ((buf = k_fifo_get(&sdp->partial_resp_queue, K_NO_WAIT))) {
 		net_buf_unref(buf);
 	}
 
