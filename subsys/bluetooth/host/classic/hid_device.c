@@ -49,6 +49,108 @@ static struct bt_hid_device connections[CONFIG_BT_MAX_CONN];
 
 static void bt_hid_deinit(struct bt_hid_device *hid);
 
+static int hid_send(struct bt_hid_session *session, uint8_t transaction,
+		    uint8_t param, const uint8_t *data, uint16_t len)
+{
+	struct net_buf *buf;
+	int err;
+
+	if (session == NULL || session->br_chan.chan.conn == NULL) {
+		return -ENOTCONN;
+	}
+
+	buf = bt_l2cap_create_pdu(NULL, 0);
+	if (buf == NULL) {
+		return -ENOMEM;
+	}
+
+	net_buf_add_u8(buf, (transaction << 4) | (param & 0x0f));
+	if (len > 0) {
+		net_buf_add_mem(buf, data, len);
+	}
+
+	err = bt_l2cap_br_chan_send(&session->br_chan.chan, buf);
+	if (err < 0) {
+		net_buf_unref(buf);
+	}
+	return err;
+}
+
+static int bt_hid_l2cap_ctrl_recv(struct bt_l2cap_chan *chan,
+				  struct net_buf *buf)
+{
+	struct bt_hid_device *hid = HID_DEVICE_BY_CTRL_CHAN(chan);
+	uint8_t header;
+	uint8_t type;
+	uint8_t param;
+
+	if (buf->len < 1) {
+		return 0;
+	}
+
+	header = net_buf_pull_u8(buf);
+	type = header >> 4;
+	param = header & 0x0f;
+	switch (type) {
+	case BT_HID_TYPE_CONTROL:
+		if (param == BT_HID_CONTROL_VIRTUAL_CABLE_UNPLUG) {
+			if (hid_cb && hid_cb->vc_unplug) {
+				hid_cb->vc_unplug(hid);
+			}
+			return bt_hid_device_disconnect(hid);
+		}
+		return 0;
+	case BT_HID_TYPE_SET_PROTOCOL:
+		if (hid_cb && hid_cb->set_protocol) {
+			hid_cb->set_protocol(hid, param & BT_HID_PROTOCOL_MASK);
+		}
+		return hid_send(&hid->ctrl_session, BT_HID_TYPE_HANDSHAKE,
+				BT_HID_HANDSHAKE_RSP_SUCCESS, NULL, 0);
+	case BT_HID_TYPE_GET_PROTOCOL:
+		if (hid_cb && hid_cb->get_protocol) {
+			hid_cb->get_protocol(hid);
+		}
+		return hid_send(&hid->ctrl_session, BT_HID_TYPE_DATA,
+				BT_HID_REPORT_TYPE_OTHER, NULL, 0);
+	case BT_HID_TYPE_SET_REPORT:
+		if (hid_cb && hid_cb->set_report) {
+			hid_cb->set_report(hid, buf->data, buf->len);
+		}
+		return hid_send(&hid->ctrl_session, BT_HID_TYPE_HANDSHAKE,
+				BT_HID_HANDSHAKE_RSP_SUCCESS, NULL, 0);
+	case BT_HID_TYPE_GET_REPORT:
+		if (hid_cb && hid_cb->get_report) {
+			hid_cb->get_report(hid, buf->data, buf->len);
+			return 0;
+		}
+		return hid_send(&hid->ctrl_session, BT_HID_TYPE_HANDSHAKE,
+				BT_HID_HANDSHAKE_RSP_ERR_UNSUPPORTED_REQ, NULL, 0);
+	case BT_HID_TYPE_SET_IDLE:
+		return hid_send(&hid->ctrl_session, BT_HID_TYPE_HANDSHAKE,
+				BT_HID_HANDSHAKE_RSP_SUCCESS, NULL, 0);
+	default:
+		return hid_send(&hid->ctrl_session, BT_HID_TYPE_HANDSHAKE,
+				BT_HID_HANDSHAKE_RSP_ERR_UNSUPPORTED_REQ, NULL, 0);
+	}
+}
+
+static int bt_hid_l2cap_intr_recv(struct bt_l2cap_chan *chan,
+				  struct net_buf *buf)
+{
+	struct bt_hid_device *hid = HID_DEVICE_BY_INTR_CHAN(chan);
+	uint8_t header;
+
+	if (buf->len < 1) {
+		return 0;
+	}
+
+	header = net_buf_pull_u8(buf);
+	if ((header >> 4) == BT_HID_TYPE_DATA && hid_cb && hid_cb->intr_data) {
+		hid_cb->intr_data(hid, buf->data, buf->len);
+	}
+	return 0;
+}
+
 static struct bt_hid_device *hid_get_connection(struct bt_conn *conn)
 {
 	struct bt_hid_device *hid = &connections[bt_conn_index(conn)];
@@ -101,6 +203,17 @@ static void bt_hid_l2cap_ctrl_connected(struct bt_l2cap_chan *chan)
 	}
 
 	hid->state = BT_HID_STATE_CTRL_CONNECTED;
+	if (hid->role == BT_HID_ROLE_INITIATOR) {
+		hid->state = BT_HID_STATE_INTR_CONNECTING;
+		err = bt_l2cap_chan_connect(hid->conn,
+					&hid->intr_session.br_chan.chan,
+					BT_L2CAP_PSM_HID_INT);
+		if (err < 0) {
+			LOG_ERR("HID interrupt connection failed: %d", err);
+			(void)bt_l2cap_chan_disconnect(chan);
+		}
+	}
+
 }
 
 static void bt_hid_l2cap_intr_connected(struct bt_l2cap_chan *chan)
@@ -139,6 +252,7 @@ static void bt_hid_l2cap_ctrl_disconnected(struct bt_l2cap_chan *chan)
 {
 	struct bt_hid_device *hid;
 	enum bt_hid_session_role role;
+	int err;
 
 	if (chan == NULL) {
 		LOG_ERR("Invalid hid chan");
@@ -158,6 +272,15 @@ static void bt_hid_l2cap_ctrl_disconnected(struct bt_l2cap_chan *chan)
 	if (role != BT_HID_SESSION_ROLE_CTRL) {
 		LOG_ERR("HID invalid role:%d", role);
 		return;
+	}
+
+	err = bt_l2cap_chan_disconnect(&hid->intr_session.br_chan.chan);
+	if (err < 0) {
+		if (hid->state == BT_HID_STATE_CONNECTED && hid_cb &&
+		    hid_cb->disconnected) {
+			hid_cb->disconnected(hid);
+		}
+		bt_hid_deinit(hid);
 	}
 }
 
@@ -198,13 +321,13 @@ static void bt_hid_init(struct bt_hid_device *hid, struct bt_conn *conn, enum bt
 	static const struct bt_l2cap_chan_ops ctrl_ops = {
 		.connected = bt_hid_l2cap_ctrl_connected,
 		.disconnected = bt_hid_l2cap_ctrl_disconnected,
-		.recv = NULL,
+		.recv = bt_hid_l2cap_ctrl_recv,
 	};
 
 	static const struct bt_l2cap_chan_ops intr_ops = {
 		.connected = bt_hid_l2cap_intr_connected,
 		.disconnected = bt_hid_l2cap_intr_disconnected,
-		.recv = NULL,
+		.recv = bt_hid_l2cap_intr_recv,
 	};
 
 	hid->ctrl_session.br_chan.chan.ops = (struct bt_l2cap_chan_ops *)&ctrl_ops;
@@ -258,9 +381,10 @@ static int hid_l2cap_intr_accept(struct bt_conn *conn, struct bt_l2cap_server *s
 	struct bt_hid_device *hid;
 
 	hid = hid_get_connection(conn);
-	if (hid == NULL) {
+	if (hid == NULL || hid->conn != conn ||
+	    hid->state != BT_HID_STATE_CTRL_CONNECTED) {
 		LOG_ERR("Cannot get HID device");
-		return -ENOMEM;
+		return -ENOTCONN;
 	}
 
 	hid->state = BT_HID_STATE_INTR_CONNECTING;
@@ -272,28 +396,69 @@ static int hid_l2cap_intr_accept(struct bt_conn *conn, struct bt_l2cap_server *s
 int bt_hid_device_send_ctrl_data(struct bt_hid_device *hid, uint8_t type, uint8_t *data,
 				 uint16_t len)
 {
-	return -ENOTSUP;
+	if (hid == NULL || hid->state < BT_HID_STATE_CTRL_CONNECTED ||
+	    hid->state >= BT_HID_STATE_DISCONNECTING) {
+		return -ENOTCONN;
+	}
+	return hid_send(&hid->ctrl_session, BT_HID_TYPE_DATA, type, data, len);
 }
 
 int bt_hid_device_send_intr_data(struct bt_hid_device *hid, uint8_t type, uint8_t *data,
 				 uint16_t len)
 {
-	return -ENOTSUP;
+	if (hid == NULL || hid->state != BT_HID_STATE_CONNECTED) {
+		return -ENOTCONN;
+	}
+	return hid_send(&hid->intr_session, BT_HID_TYPE_DATA, type, data, len);
 }
 
 int bt_hid_device_report_error(struct bt_hid_device *hid, uint8_t error)
 {
-	return -ENOTSUP;
+	if (hid == NULL) {
+		return -EINVAL;
+	}
+	return hid_send(&hid->ctrl_session, BT_HID_TYPE_HANDSHAKE, error, NULL, 0);
 }
 
 struct bt_hid_device *bt_hid_device_connect(struct bt_conn *conn)
 {
-	return NULL;
+	struct bt_hid_device *hid;
+	int err;
+
+	if (conn == NULL) {
+		return NULL;
+	}
+
+	hid = hid_get_connection(conn);
+	if (hid == NULL || hid->conn != NULL) {
+		return NULL;
+	}
+
+	bt_hid_init(hid, conn, BT_HID_ROLE_INITIATOR);
+	err = bt_l2cap_chan_connect(conn, &hid->ctrl_session.br_chan.chan,
+				    BT_L2CAP_PSM_HID_CTL);
+	if (err < 0) {
+		bt_hid_deinit(hid);
+		return NULL;
+	}
+
+	return hid;
 }
 
 int bt_hid_device_disconnect(struct bt_hid_device *hid)
 {
-	return -ENOTSUP;
+	int err;
+
+	if (hid == NULL || hid->conn == NULL) {
+		return -EINVAL;
+	}
+
+	hid->state = BT_HID_STATE_DISCONNECTING;
+	err = bt_l2cap_chan_disconnect(&hid->intr_session.br_chan.chan);
+	if (err < 0 && err != -ENOTCONN) {
+		return err;
+	}
+	return bt_l2cap_chan_disconnect(&hid->ctrl_session.br_chan.chan);
 }
 
 int bt_hid_device_register(struct bt_hid_device_cb *cb)
