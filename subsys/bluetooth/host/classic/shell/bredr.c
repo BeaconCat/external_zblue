@@ -660,47 +660,5 @@ static int cmd_br(const struct shell *sh, size_t argc, char **argv)
 	return -ENOEXEC;
 }
 
-#define HELP_NONE "[none]"
-#define HELP_ADDR "<address: XX:XX:XX:XX:XX:XX>"
-#define HELP_REG                                                      \
-	"<psm> <mode: none, ret, fc, eret, stream> [hold_credit] "    \
-	"[mode_optional] [extended_control]"
-
-#define HELP_CONN                                                     \
-	"<psm> <mode: none, ret, fc, eret, stream> [hold_credit] "    \
-	"[mode_optional] [extended_control]"
-
-SHELL_STATIC_SUBCMD_SET_CREATE(l2cap_cmds,
-#if defined(CONFIG_BT_L2CAP_RET_FC)
-	SHELL_CMD_ARG(register, NULL, HELP_REG, cmd_l2cap_register, 3, 3),
-	SHELL_CMD_ARG(connect, NULL, HELP_CONN, cmd_l2cap_connect, 3, 3),
-#else
-	SHELL_CMD_ARG(register, NULL, "<psm>", cmd_l2cap_register, 2, 0),
-	SHELL_CMD_ARG(connect, NULL, "<psm>", cmd_l2cap_connect, 2, 0),
-#endif /* CONFIG_BT_L2CAP_RET_FC */
-	SHELL_CMD_ARG(disconnect, NULL, HELP_NONE, cmd_l2cap_disconnect, 1, 0),
-	SHELL_CMD_ARG(send, NULL, "[number of packets] [length of packet(s)]",
-		      cmd_l2cap_send, 1, 2),
-#if defined(CONFIG_BT_L2CAP_RET_FC)
-	SHELL_CMD_ARG(credits, NULL, HELP_NONE, cmd_l2cap_credits, 1, 0),
-#endif /* CONFIG_BT_L2CAP_RET_FC */
-	SHELL_SUBCMD_SET_END
-);
-
-SHELL_STATIC_SUBCMD_SET_CREATE(br_cmds,
-	SHELL_CMD_ARG(auth-pincode, NULL, "<pincode>", cmd_auth_pincode, 2, 0),
-	SHELL_CMD_ARG(connect, NULL, "<address>", cmd_connect, 2, 0),
-	SHELL_CMD_ARG(bonds, NULL, HELP_NONE, cmd_bonds, 1, 0),
-	SHELL_CMD_ARG(clear, NULL, "[all] ["HELP_ADDR"]", cmd_clear, 2, 0),
-	SHELL_CMD_ARG(discovery, NULL, "<value: on, off> [length: 1-48] [mode: limited]",
-		      cmd_discovery, 2, 2),
-	SHELL_CMD_ARG(iscan, NULL, "<value: on, off> [mode: limited]",
-		      cmd_discoverable, 2, 1),
-	SHELL_CMD(l2cap, &l2cap_cmds, HELP_NONE, cmd_default_handler),
-	SHELL_CMD_ARG(oob, NULL, NULL, cmd_oob, 1, 0),
-	SHELL_CMD_ARG(pscan, NULL, "<value: on, off>", cmd_connectable, 2, 0),
-	SHELL_CMD_ARG(sdp-find, NULL, "<HFPAG, HFPHF>", cmd_sdp_find_record, 2, 0),
-	SHELL_SUBCMD_SET_END
-);
-
-SHELL_CMD_ARG_REGISTER(br, &br_cmds, "Bluetooth BR/EDR shell commands", cmd_default_handler, 1, 1);
+SHELL_CMD_ARG_REGISTER(br, &br_cmds, "Bluetooth BR/EDR shell commands",
+		       cmd_br, 1, 1);
