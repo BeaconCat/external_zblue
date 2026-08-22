@@ -3642,6 +3642,15 @@ int Z_API(bt_hfp_hf_audio_connect)(struct bt_hfp_hf *hf)
 #endif /* CONFIG_BT_HFP_HF_CODEC_NEG */
 }
 
+int Z_API(bt_hfp_hf_sco_send)(struct bt_hfp_hf *hf,
+			      const void *data, size_t len)
+{
+	if (hf == NULL || hf->chan.sco == NULL) {
+		return -ENOTCONN;
+	}
+	return bt_sco_send(hf->chan.sco, data, len);
+}
+
 #if defined(CONFIG_BT_HFP_HF_CODEC_NEG)
 static int bcs_finish(struct at_client *hf_at, enum bt_at_result result,
 		   enum bt_at_cme cme_err)
@@ -4428,6 +4437,16 @@ static void hfp_hf_sco_disconnected(struct bt_sco_chan *chan, uint8_t reason)
 	}
 }
 
+static void hfp_hf_sco_recv(struct bt_sco_chan *chan, struct net_buf *buf,
+			    uint8_t packet_status)
+{
+	struct bt_hfp_hf *hf = CONTAINER_OF(chan, struct bt_hfp_hf, chan);
+
+	if (bt_hf != NULL && bt_hf->sco_recv != NULL) {
+		bt_hf->sco_recv(hf, buf->data, buf->len, packet_status);
+	}
+}
+
 static int hfp_hf_set_voice_setting(struct bt_hfp_hf *hf)
 {
 	uint16_t air_coding_fmt;
@@ -4471,6 +4490,7 @@ static int bt_hfp_hf_sco_accept(const struct bt_sco_accept_info *info,
 	static const struct bt_sco_chan_ops ops = {
 		.connected = hfp_hf_sco_connected,
 		.disconnected = hfp_hf_sco_disconnected,
+		.recv = hfp_hf_sco_recv,
 	};
 	size_t index;
 	struct bt_hfp_hf *hf;
