@@ -212,9 +212,6 @@ struct net_buf_pool *_net_buf_pool_list[] = {
 #if defined(CONFIG_BT_CHANNEL_SOUNDING)
 	&reassembly_buf_pool,
 #endif /* CONFIG_BT_CHANNEL_SOUNDING */
-#if defined(CONFIG_BT_SAMPLE_BAP_UNICAST_SERVER)
-	&tx_pool,
-#endif /* CONFIG_BT_SAMPLE_BAP_UNICAST_SERVER */
 #endif /* CONFIG_BT_HCI_HOST */
 
 #if defined(CONFIG_BT_CLASSIC)
