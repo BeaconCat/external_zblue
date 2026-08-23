@@ -34,7 +34,7 @@ bool k_is_in_isr(void)
 k_tid_t k_thread_current(void)
 {
 	struct k_thread *thread;
-	void *pid = (void *)gettid();
+	void *pid = (void *)(intptr_t)gettid();
 
 #if !defined(CONFIG_ZEPHYR_WORK_QUEUE)
 	if (pid == k_sys_work_q.thread.init_data)
@@ -119,7 +119,7 @@ k_tid_t k_thread_create(struct k_thread *new_thread,
 	pthread_setaffinity_np(pid, sizeof(cpu_set_t), &cpuset0);
 #endif /* CONFIG_SMP */
 
-	new_thread->init_data = (void *)pid;
+	new_thread->init_data = (void *)(uintptr_t)pid;
 	sys_dlist_append(&g_task_list, &new_thread->base.qnode_dlist);
 
 	return (k_tid_t)new_thread;
@@ -127,7 +127,7 @@ k_tid_t k_thread_create(struct k_thread *new_thread,
 
 int k_thread_name_set(k_tid_t thread, const char *str)
 {
-    return prctl(PR_SET_NAME_EXT, str, (int)thread->init_data);
+    return prctl(PR_SET_NAME_EXT, str, (int)(uintptr_t)thread->init_data);
 }
 
 void k_thread_start(k_tid_t thread)
@@ -144,7 +144,7 @@ void k_thread_resume(k_tid_t thread)
 
 void k_thread_abort(k_tid_t thread)
 {
-	pthread_t pid = (pthread_t)thread->init_data;
+	pthread_t pid = (pthread_t)(uintptr_t)thread->init_data;
 
 	if (sys_dnode_is_linked(&thread->base.qnode_dlist)) {
 		sys_dlist_remove(&thread->base.qnode_dlist);
